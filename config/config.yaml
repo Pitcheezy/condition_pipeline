@@ -1,0 +1,120 @@
+project:
+  name: condition_pipeline
+  season_year: 2025
+  random_seed: 42
+
+paths:
+  raw_dir: data/raw
+  interim_dir: data/interim
+  processed_dir: data/processed
+  output_tables_dir: outputs/tables
+  output_figures_dir: outputs/figures
+  output_logs_dir: outputs/logs
+
+data:
+  file_name: statcast_2025.parquet
+  sort_keys:
+    - game_date
+    - game_pk
+    - inning
+    - at_bat_number
+    - pitch_number
+
+columns:
+  selected:
+    - game_date
+    - game_pk
+    - pitcher
+    - batter
+    - pitch_type
+    - pitch_name
+    - release_speed
+    - release_spin_rate
+    - release_extension
+    - release_pos_x
+    - release_pos_z
+    - pfx_x
+    - pfx_z
+    - plate_x
+    - plate_z
+    - zone
+    - balls
+    - strikes
+    - inning
+    - inning_topbot
+    - outs_when_up
+    - at_bat_number
+    - pitch_number
+    - description
+    - events
+    - bb_type
+    - estimated_woba_using_speedangle
+
+pitcher_filters:
+  starter:
+    min_games_started: 15
+    min_avg_innings_per_start: 5.0
+    min_total_innings: 75.0
+
+  reliever:
+    min_games: 30
+    min_avg_pitches_per_inning: 15.0
+    min_total_innings: 30.0
+
+baseline:
+  method: mean
+  by_pitch_type: false
+
+condition_features:
+  use_columns:
+    - release_speed
+    - release_spin_rate
+    - pfx_x
+    - pfx_z
+    - release_pos_x
+    - release_pos_z
+
+outcome_features:
+  hard_hit_threshold: 95.0
+
+rolling:
+  windows:
+    - 5
+    - 10
+    - 15
+
+labeling:
+  method: zscore
+  zscore_good: 1.0
+  zscore_bad: -1.0
+  quantile_good: 0.7
+  quantile_bad: 0.3
+
+threshold:
+  method: binning
+  n_bins: 20
+  min_samples_per_bin: 30
+
+aggregation:
+  starter_unit: inning
+  reliever_unit: outing
+
+scoring:
+  weights:
+    delta_release_speed: 0.30
+    delta_release_spin_rate: 0.25
+    rolling_whiff_rate_10: 0.20
+    rolling_strike_rate_10: 0.15
+    rolling_xwoba_10: -0.30
+    hard_hit_rate: -0.20
+
+trend:
+  starter_recent_innings: 3
+  reliever_recent_pitches: 10
+
+decision:
+  keep_score_threshold: 0.30
+  watch_score_threshold: 0.00
+  pull_score_threshold: -0.30
+  use_trend: true
+  use_pitch_count: true
