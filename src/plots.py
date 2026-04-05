@@ -66,46 +66,58 @@ def run(config: dict[str, Any], paths: ProjectPaths) -> None:
             if r_keys:
                 base = base.merge(r, on=r_keys, how="left", suffixes=("", "_roll"))
 
-        # y 우선순위: rolling_whiff_rate_10 -> xwoba
-        y_whiff_col = "rolling_whiff_rate_10" if "rolling_whiff_rate_10" in base.columns else None
-        y_xwoba_col = "xwoba" if "xwoba" in base.columns else None
-        if y_xwoba_col is None and y_whiff_col is None:
-            logger.warning("scatter y 컬럼 없음(role=%s): xwoba/rolling_whiff_rate_10 둘 다 없음", role)
-            return
+        # [수정 1] 패스트볼(포심 'FF', 싱커 'SI') 계열만 필터링하여 노이즈 제거
+        if "pitch_type" in base.columns:
+            fastball_df = base[base["pitch_type"].isin(["FF", "SI"])].copy()
+            if not fastball_df.empty:
+                base = fastball_df
+            else:
+                logger.warning("scatter: 패스트볼(FF, SI) 데이터가 없어 전체 구종으로 진행합니다 (role=%s)", role)
 
-        x1 = "delta_release_speed"
-        x2 = "delta_release_spin_rate"
+        # [수정 2] X축: 가급적 Rolling(이동 평균) 지표를 우선 사용, 없으면 기존 단일 투구 Delta 사용
+        x1 = "rolling_delta_release_speed_10" if "rolling_delta_release_speed_10" in base.columns else "delta_release_speed"
+        x2 = "rolling_delta_release_spin_rate_10" if "rolling_delta_release_spin_rate_10" in base.columns else "delta_release_spin_rate"
+        
         if x1 not in base.columns or x2 not in base.columns:
             logger.warning("scatter x 컬럼 없음(role=%s): %s 또는 %s 없음", role, x1, x2)
             return
 
-        # y 컬럼 선택
-        y_col = y_xwoba_col if y_xwoba_col is not None else y_whiff_col
-        y_label = "estimated_woba_using_speedangle (xwoba)" if y_col == y_xwoba_col else "whiff_rate (rolling_whiff_rate_10)"
+        # [수정 3] Y축: 단일 투구 결과가 아닌, 최근 10구 이동 평균 결과(Rolling) 우선 사용
+        y_xwoba_col = "rolling_xwoba_10" if "rolling_xwoba_10" in base.columns else ("xwoba" if "xwoba" in base.columns else None)
+        y_whiff_col = "rolling_whiff_rate_10" if "rolling_whiff_rate_10" in base.columns else None
+        
+        if y_xwoba_col is None and y_whiff_col is None:
+            logger.warning("scatter y 컬럼 없음(role=%s): rolling_xwoba_10/xwoba 등 결과 컬럼 없음", role)
+            return
 
-        # scatter 2개를 한 figure로
+        # Y 컬럼 선택 (xwoba 우선)
+        y_col = y_xwoba_col if y_xwoba_col is not None else y_whiff_col
+        y_label = y_col # 동적으로 선택된 컬럼명을 라벨로 사용
+
+        # scatter 2개를 한 figure로 그리기
         fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), constrained_layout=True)
+        
         sample = base[[x1, x2, y_col]].copy()
-        sample = sample.dropna(subset=[x1, x2, y_col])
+        sample = sample.dropna(subset=[x1, x2, y_col]) # 분석 불가능한 결측치 제거
+        
         if len(sample) > 30_000:
             sample = sample.sample(30_000, random_state=42)
 
+        # 그래프 1: 구속 변화 vs 결과
         axes[0].scatter(pd.to_numeric(sample[x1], errors="coerce"), pd.to_numeric(sample[y_col], errors="coerce"), s=6, alpha=0.25)
-        axes[0].set_xlabel("delta_release_speed")
+        axes[0].set_xlabel(x1)
         axes[0].set_ylabel(y_label)
-        axes[0].set_title(f"{role}: delta_release_speed vs {y_label}")
+        axes[0].set_title(f"{role}: {x1}\nvs {y_label}")
 
+        # 그래프 2: 회전수 변화 vs 결과
         axes[1].scatter(pd.to_numeric(sample[x2], errors="coerce"), pd.to_numeric(sample[y_col], errors="coerce"), s=6, alpha=0.25, color="orange")
-        axes[1].set_xlabel("delta_release_spin_rate")
-        axes[1].set_title(f"{role}: delta_release_spin_rate vs {y_label}")
+        axes[1].set_xlabel(x2)
+        axes[1].set_title(f"{role}: {x2}\nvs {y_label}")
 
         out = paths.output_figures_dir / f"debug_plot1_delta_outcome_scatter_{role}.png"
         fig.savefig(out, dpi=120, bbox_inches="tight")
         plt.close(fig)
         logger.info("plots 저장: %s", out)
-
-    plot_delta_outcome_scatter("starter")
-    plot_delta_outcome_scatter("reliever")
 
     # -----------------------------
     # 2) binning 기반 threshold plot

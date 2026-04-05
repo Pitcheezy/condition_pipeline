@@ -24,7 +24,7 @@ def quadrant_summary(df: pd.DataFrame, x_col: str, y_col: str, role: str) -> pd.
     
     # 1. x축 (지표 - Condition) 절대 기준선 설정
     if "delta_release_speed" in x_col:
-        xm = -1.0  # 평소(Baseline)보다 1마일 이상 떨어졌을 때를 저하 기준으로 설정
+        xm = -1.1  # 평소(Baseline)보다 1마일 이상 떨어졌을 때를 저하 기준으로 설정
     elif "delta_release_spin_rate" in x_col:
         xm = -100.0  # 회전수가 100rpm 이상 감소했을 때를 저하 기준으로 설정
     else:
@@ -32,7 +32,7 @@ def quadrant_summary(df: pd.DataFrame, x_col: str, y_col: str, role: str) -> pd.
         
     # 2. y축 (결과 - Outcome) 절대 기준선 설정
     if "xwoba" in y_col:
-        ym = 0.350  # xwOBA가 0.350 이상이면 타격 결과가 나쁜 것(리그 평균 대비 높음)으로 판단
+        ym = 0.360  # xwOBA가 0.350 이상이면 타격 결과가 나쁜 것(리그 평균 대비 높음)으로 판단
     elif "whiff_rate" in y_col:
         ym = 0.200  # 헛스윙률이 20% 이하면 구위가 나쁜 것으로 판단
     else:

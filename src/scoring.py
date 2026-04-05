@@ -28,33 +28,41 @@ def assign_pitcher_state(df: pd.DataFrame) -> pd.DataFrame:
     """투수의 현재 구위(Condition)와 타격 결과(Outcome)를 바탕으로 4분면 상태를 부여합니다."""
     out = df.copy()
     
-    # 평가할 기준 컬럼 설정 (이닝/아웃팅 집계 데이터에 존재하는 컬럼 기준)
+    # 1. 구위 지표 (Condition)
     cond_col = "delta_release_speed"
-    # rolling 데이터가 집계 테이블에 없다면 일반 xwoba 사용
-    out_col = "rolling_xwoba_10" if "rolling_xwoba_10" in out.columns else "xwoba"
+    if cond_col not in out.columns:
+        out[cond_col] = 0.0
+    x_speed = pd.to_numeric(out[cond_col], errors="coerce").fillna(0.0)
 
-    if cond_col not in out.columns or out_col not in out.columns:
-        out["pitcher_state"] = "Unknown"
-        return out
+    # 2. 결과 지표 (Outcome) - xwOBA와 헛스윙률(whiff) 동시 사용!
+    xw_col = "rolling_xwoba_10" if "rolling_xwoba_10" in out.columns else "xwoba"
+    wh_col = "rolling_whiff_rate_10" if "rolling_whiff_rate_10" in out.columns else "is_whiff"
+    
+    if xw_col not in out.columns: out[xw_col] = 0.0
+    if wh_col not in out.columns: out[wh_col] = 1.0
+        
+    y_xwoba = pd.to_numeric(out[xw_col], errors="coerce").fillna(0.0)
+    y_whiff = pd.to_numeric(out[wh_col], errors="coerce").fillna(1.0)
 
-    x = pd.to_numeric(out[cond_col], errors="coerce")
-    y = pd.to_numeric(out[out_col], errors="coerce")
+    # 3. 기준점 (Threshold) 설정
+    cond_threshold = -0.5    # 구속 1마일 이상 떨어지면 Bad
+    xwoba_threshold = 0.340  # 인플레이 타구 질이 0.350 이상이면 Bad
+    whiff_threshold = 0.100  # 헛스윙률이 20% 이하면 타자 타이밍을 못 뺏는 중이니 Bad
 
-    # 절대 임계값 (분석가가 찾는 핵심 변곡점. 필요시 config로 뺄 수 있음)
-    cond_threshold = -1.0   # 예: 평소보다 구속이 1마일 이상 하락하면 Bad
-    out_threshold = 0.350   # 예: xwOBA가 0.350 이상이면 Bad
-
-    # 조건(True/False) 정의
-    cond_good = x >= cond_threshold
-    cond_bad = x < cond_threshold
-    out_good = y < out_threshold
-    out_bad = y >= out_threshold
+    # 4. 상태 판별 로직
+    cond_good = x_speed >= cond_threshold
+    cond_bad = x_speed < cond_threshold
+    
+    # 🔥 결과가 나쁘다(Bad Outcome)의 정의: 
+    # 엄청 잘 맞고 있거나(xwOBA 높음) '또는(|)' 헛스윙을 아예 못 끌어냄(whiff 낮음)
+    out_bad = (y_xwoba >= xwoba_threshold) | (y_whiff < whiff_threshold)
+    out_good = ~out_bad # out_bad의 반대 (인플레이 억제도 잘하고 헛스윙도 잘 뺏음)
 
     conditions = [
-        cond_good & out_good,  # State A: 지표 Good, 결과 Good
-        cond_bad & out_good,   # State B: 지표 Bad,  결과 Good
-        cond_good & out_bad,   # State C: 지표 Good, 결과 Bad
-        cond_bad & out_bad     # State D: 지표 Bad,  결과 Bad
+        cond_good & out_good,  # State A (KEEP)
+        cond_bad & out_good,   # State B (WARM_UP)
+        cond_good & out_bad,   # State C (MOUND_VISIT)
+        cond_bad & out_bad     # State D (PULL)
     ]
     
     choices = ['State_A', 'State_B', 'State_C', 'State_D']
