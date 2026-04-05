@@ -1,6 +1,15 @@
 # condition_pipeline
 
-투수 컨디션 분석 파이프라인. 단계는 아래 순서로 연결한다.
+투수 컨디션 저하 신호를 정량화해, 이닝/아웃팅 단위로 `KEEP / WARM_UP / MOUND_VISIT / PULL` 의사결정을 만드는 파이프라인입니다.
+
+## 프로젝트 핵심
+
+- **목표:** 투구 단위 Statcast 데이터를 받아 투수 컨디션과 타구 결과를 결합해 교체 신호를 생성
+- **핵심 지표 축:**
+  - Condition 축: `delta_release_speed` (baseline 대비 구속 변화)
+  - Outcome 축: `rolling_xwoba_10`, `rolling_whiff_rate_10` (없으면 `xwoba`, `is_whiff` 대체)
+- **핵심 구조:** pitch 레벨 특성 생성 → inning/outing 집계 → 상태(State_A~D) 부여 → 최종 decision 매핑
+- **안정성 포인트:** 집계 단계(`aggregate.py`)에서 의사결정 핵심 피처가 누락되지 않도록 보정/전달
 
 ## 데이터 수집 (Statcast)
 
@@ -12,22 +21,29 @@
 
 ## 파이프라인 흐름
 
-1. 데이터 수집 — `collect.py`
+1. 데이터 수집/정렬 — `collect.py`
 2. 선발/불펜 분리 — `split_pitchers.py`
-3. 기준 필터링 — `filter_pitchers.py`
+3. 투수 필터링 — `filter_pitchers.py`
 4. baseline 생성 — `baseline.py`
-5. delta 계산(컨디션) — `condition_features.py`
-6. 결과 지표 생성 — `outcome_features.py`
-7. rolling 집계 — `rolling_features.py`
-8. good/bad 기준 생성 — `labeling.py`
-9. 4분면 분석 — `quadrant_analysis.py`
-10. 그래프·threshold 분석 — `plots.py`, `threshold_analysis.py`
-11. inning/outing 집계 — `aggregate.py`
-12. score 계산 — `scoring.py`
-13. trend 분석 — `trend.py`
-14. 교체 판단 — `decision.py`
+5. delta 생성 — `condition_features.py`
+6. outcome 생성 — `outcome_features.py`
+7. rolling 지표 생성 — `rolling_features.py`
+8. 라벨링/진단 — `labeling.py`, `quadrant_analysis.py`, `plots.py`, `threshold_analysis.py`
+9. inning/outing 집계 — `aggregate.py`
+10. 상태/점수 계산 — `scoring.py`
+11. 추세 반영 — `trend.py`
+12. 최종 의사결정 — `decision.py`
 
 전체 오케스트레이션 — `pipeline.py`
+
+## 최종 의사결정 로직
+
+- `scoring.py`에서 4분면 상태를 부여
+  - `State_A` → `KEEP`
+  - `State_B` → `WARM_UP`
+  - `State_C` → `MOUND_VISIT`
+  - `State_D` → `PULL`
+- `decision.py`에서 상태를 최종 decision 문자열로 매핑하고 분포를 `debug_decision_counts.parquet`에 저장
 
 ## 디렉터리
 
@@ -48,6 +64,7 @@ python scripts/run_pipeline.py
 
 - **그래프:** `plots` 단계는 `matplotlib`이 있을 때만 생성된다. 설치되어 있지 않으면 해당 단계는 건너뛴다.
 - **Statcast 자동 수집:** raw parquet이 없을 때만 네트워크로 가져온다. 이미 `data/raw/statcast_2025.parquet`를 두었다면 재수집하지 않는다.
+- **결정 분포 확인:** `outputs/tables/debug_decision_counts.parquet`
 
 ## 설정 참고
 
