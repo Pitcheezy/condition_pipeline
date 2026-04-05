@@ -71,7 +71,7 @@ pitcher_filters:
 
 baseline:
   method: mean
-  by_pitch_type: false
+  by_pitch_type: true
 
 condition_features:
   use_columns:

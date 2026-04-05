@@ -1,4 +1,4 @@
-"""교체 판단: KEEP / WATCH / PULL (starter / reliever 분리)."""
+"""교체 판단: KEEP / WARM_UP / MOUND_VISIT / PULL (starter / reliever 분리)."""
 
 from __future__ import annotations
 
@@ -20,22 +20,47 @@ def apply_decisions(df: pd.DataFrame, cfg: dict[str, Any]) -> pd.DataFrame:
     if out.empty:
         out["decision"] = pd.Series(dtype=object)
         return out
-    s = pd.to_numeric(out["condition_score"], errors="coerce").fillna(0.0)
+        
+    # 기존 점수 기반 보정 로직 (참고 지표용으로 남김)
+    s = pd.to_numeric(out.get("condition_score", 0.0), errors="coerce").fillna(0.0)
     if cfg.get("use_trend", True) and "trend_delta" in out.columns:
         td = pd.to_numeric(out["trend_delta"], errors="coerce").fillna(0.0)
         adj = s + 0.1 * td
     else:
         adj = s
+        
     if cfg.get("use_pitch_count", True) and "pitch_count" in out.columns:
         pass  # TODO: 장이닝·고구수 페널티
-    keep_th = float(cfg["keep_score_threshold"])
-    watch_th = float(cfg["watch_score_threshold"])
-    pull_th = float(cfg["pull_score_threshold"])
-    out["decision"] = np.select(
-        [adj >= keep_th, adj >= watch_th, adj >= pull_th],
-        ["KEEP", "WATCH", "WATCH"],
-        default="PULL",
-    )
+        
+    out["adjusted_score"] = adj  # 디버깅 및 보조 확인용 저장
+
+    # 4분면 상태(State) 기반 Decision 로직
+    if "pitcher_state" in out.columns:
+        def map_state_to_decision(state: str) -> str:
+            if state == 'State_A':
+                return "KEEP"           # 지표도 결과도 좋음 -> 투구 지속
+            elif state == 'State_B':
+                return "WARM_UP"        # 운 좋게 아웃을 잡으나 구위 급락 -> 불펜 준비 시작
+            elif state == 'State_C':
+                return "MOUND_VISIT"    # 구위는 좋으나 정타를 맞기 시작 -> 타이밍 뺏기 위한 마운드 방문
+            elif state == 'State_D':
+                return "PULL"           # 구속/회전수 저하 및 피안타율 증가 -> 즉시 강판
+            else:
+                return "WATCH"          # 데이터 부족 시 관찰
+                
+        out["decision"] = out["pitcher_state"].apply(map_state_to_decision)
+        
+    else:
+        # Fallback 로직: State가 없는 경우 기존 config의 임계값을 사용해 결정
+        keep_th = float(cfg["keep_score_threshold"])
+        watch_th = float(cfg["watch_score_threshold"])
+        pull_th = float(cfg["pull_score_threshold"])
+        out["decision"] = np.select(
+            [adj >= keep_th, adj >= watch_th, adj >= pull_th],
+            ["KEEP", "WATCH", "WATCH"],
+            default="PULL",
+        )
+        
     return out
 
 
@@ -70,7 +95,7 @@ def run(config: dict[str, Any], paths: ProjectPaths) -> None:
     rp_dir["role"] = "reliever"
     all_d = pd.concat([st_dir, rp_dir], ignore_index=True)
 
-    # decision KEEP/WATCH/PULL count
+    # decision WARM_UP/MOUND_VISIT/KEEP/PULL count
     if not all_d.empty and "decision" in all_d.columns:
         counts = all_d["decision"].value_counts(dropna=False).rename_axis("decision").reset_index(name="n")
         counts.to_parquet(paths.output_tables_dir / "debug_decision_counts.parquet", index=False)
@@ -84,6 +109,7 @@ def run(config: dict[str, Any], paths: ProjectPaths) -> None:
             .reset_index(name="n")
         )
         cross.to_parquet(paths.output_tables_dir / "debug_decision_trend_cross.parquet", index=False)
+        
     st_d.to_parquet(paths.processed_dir / A.STARTER_INNING_DECISION, index=False)
     rp_d.to_parquet(paths.processed_dir / A.RELIEVER_OUTING_DECISION, index=False)
     logger.info("판단 저장: starter=%s reliever=%s", len(st_d), len(rp_d))

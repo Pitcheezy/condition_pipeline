@@ -14,16 +14,34 @@ from debug_utils import log_step_io, save_debug_sample
 
 logger = logging.getLogger(__name__)
 
-
 def quadrant_summary(df: pd.DataFrame, x_col: str, y_col: str, role: str) -> pd.DataFrame:
-    """두 축의 중앙값 기준 4분면 카운트."""
-    # TODO: 커스텀 축·가중치
+    """두 축의 절대적 기준점(Threshold) 기반 4분면 카운트."""
     if x_col not in df.columns or y_col not in df.columns:
         return pd.DataFrame({"role": [role], "quadrant": ["undefined"], "n": [0]})
+    
     x = pd.to_numeric(df[x_col], errors="coerce")
     y = pd.to_numeric(df[y_col], errors="coerce")
-    xm = x.median()
-    ym = y.median()
+    
+    # 1. x축 (지표 - Condition) 절대 기준선 설정
+    if "delta_release_speed" in x_col:
+        xm = -1.0  # 평소(Baseline)보다 1마일 이상 떨어졌을 때를 저하 기준으로 설정
+    elif "delta_release_spin_rate" in x_col:
+        xm = -100.0  # 회전수가 100rpm 이상 감소했을 때를 저하 기준으로 설정
+    else:
+        xm = x.median()  # 그 외의 알 수 없는 지표는 임시로 중앙값 사용
+        
+    # 2. y축 (결과 - Outcome) 절대 기준선 설정
+    if "xwoba" in y_col:
+        ym = 0.350  # xwOBA가 0.350 이상이면 타격 결과가 나쁜 것(리그 평균 대비 높음)으로 판단
+    elif "whiff_rate" in y_col:
+        ym = 0.200  # 헛스윙률이 20% 이하면 구위가 나쁜 것으로 판단
+    else:
+        ym = y.median()
+
+    # 3. 4분면 분류 (기준점 적용)
+    # x >= xm : 구속/회전수 등 지표가 기준치 이상 (Good Condition)
+    # x < xm  : 구속/회전수 등 지표가 기준치 미만 (Bad Condition)
+    # y >= ym : 결과 지표가 기준치 이상 (xwOBA라면 Bad Outcome, whiff_rate라면 Good Outcome)
     quad = np.where(
         (x >= xm) & (y >= ym),
         "Q1_high_high",
@@ -33,9 +51,15 @@ def quadrant_summary(df: pd.DataFrame, x_col: str, y_col: str, role: str) -> pd.
             np.where((x >= xm) & (y < ym), "Q3_high_low", "Q4_low_low"),
         ),
     )
+    
     tmp = pd.DataFrame({"quad": quad})
     c = tmp["quad"].value_counts().rename_axis("quadrant").reset_index(name="n")
     c["role"] = role
+    
+    # 결과 데이터에 사용된 기준점(Threshold)을 함께 저장하여 디버깅 및 분석에 활용
+    c["x_threshold"] = xm
+    c["y_threshold"] = ym
+    
     return c
 
 
