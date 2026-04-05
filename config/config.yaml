@@ -3,6 +3,14 @@ project:
   season_year: 2025
   random_seed: 42
 
+data_fetch:
+  # SmartPitch의 fetch 로직을 동일하게 적용하기 위한 기간/분할 설정
+  # pybaseball 설치 후 raw 파일이 없으면 아래 기간을 chunk 단위로 직접 수집합니다.
+  start_date: "2025-03-01"
+  end_date: "2025-11-01"
+  chunk_days: 30
+  use_cache: true
+
 paths:
   raw_dir: data/raw
   interim_dir: data/interim
